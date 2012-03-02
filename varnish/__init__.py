@@ -24,12 +24,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
 from .utils import setup_logging
-from .api import (init,
-                  access_instance,
-                  close,
-                  delete,
-                  stats_init,
-                  stats_iterate)
+from . import api
 from .stats import VarnishStats
 
 __version__ = (0, 0, 0, 'dev', 0)
@@ -40,29 +35,48 @@ __all__ = ['Varnish']
 class Varnish(object):
 
     def __init__(self, name=None):
-        self.vd = init()
+        self.vd = api.init()
         self.name = name
         self._stats_init = False
+        self._logs_init = False
         if name:
-            access_instance(self.vd, self.name)
+            api.access_instance(self.vd, self.name)
 
     def __del__(self):
         try:
-            close(self.vd)
-            delete(self.vd)
+            api.close(self.vd)
+            api.delete(self.vd)
 
         except:
             pass
+
+    def init_logs(self):
+        if self._logs_init:
+            return
+
+        api.logs_init(self.vd)
+        self._logs_init = True
 
     def init_stats(self):
         if self._stats_init:
             return
 
-        stats_init(self.vd)
+        api.stats_init(self.vd)
         self._stats_init = True
 
     def read_stats(self):
         self.init_stats()
         stats = list()
-        stats_iterate(self.vd, lambda point, data: data.append(point), stats)
+        api.stats_iterate(self.vd,
+                          lambda point, data: data.append(point), stats)
         return VarnishStats(stats)
+
+    def read_logs(self, source=None):
+        def cb(chunk):
+            print chunk
+
+        self.init_logs()
+        if source != None:
+            raise NotImplementedError
+
+        api.logs_dispatch(self.vd, cb)

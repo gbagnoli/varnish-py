@@ -23,6 +23,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
+import collections
 import ctypes
 import inspect
 import logging
@@ -32,6 +33,9 @@ from ctypes import (Structure,
                     c_void_p,
                     c_char_p,
                     c_int,
+                    c_char,
+                    c_uint,
+                    c_uint64,
                     c_ulong,
                     py_object)
 from .exc import (VarnishException,
@@ -41,6 +45,7 @@ varnishapi = ctypes.CDLL('libvarnishapi.so')
 log = logging.getLogger(__name__)
 
 
+# STRUCTURES
 class _VSM_data(Structure):
     pass
 
@@ -58,6 +63,88 @@ class _VSC_Point(Structure):
                 ('flag', c_int),
                 ('desc', c_char_p),
                 ('ptr', c_void_p)]
+
+# CTYPES DEFINITIONS
+# generic
+_VSM_New = varnishapi.VSM_New
+_VSM_New.argtypes = []
+_VSM_New.restype = POINTER(_VSM_data)
+
+_VSM_diag_f = CFUNCTYPE(None, c_void_p)
+_VSM_Diag = varnishapi.VSM_Diag
+_VSM_Diag.argtypes = [POINTER(_VSM_data), _VSM_diag_f, py_object]
+_VSM_Diag.restype = None
+
+_VSM_n_Arg = varnishapi.VSM_n_Arg
+_VSM_n_Arg.argtypes = [POINTER(_VSM_data), c_char_p]
+_VSM_n_Arg.restype = c_int
+
+_VSM_Close = varnishapi.VSM_Close
+_VSM_Close.argtypes = [POINTER(_VSM_data)]
+_VSM_Close.restype = None
+
+_VSM_Delete = varnishapi.VSM_Close
+_VSM_Delete.argtypes = [POINTER(_VSM_data)]
+_VSM_Delete.restype = None
+
+# stats
+_VSC_Setup = varnishapi.VSC_Setup
+_VSC_Setup.argtypes = [POINTER(_VSM_data)]
+_VSC_Setup.restype = None
+
+_VSC_Open = varnishapi.VSC_Open
+_VSC_Open.argtypes = [POINTER(_VSM_data), c_int]
+_VSC_Open.restype = c_int
+
+_VSC_Arg = varnishapi.VSC_Arg
+_VSC_Arg.argtypes = [POINTER(_VSM_data), c_int, c_char_p]
+_VSC_Arg.restype = c_int
+
+_VSC_Main = varnishapi.VSC_Main
+_VSC_Main.argtypes = [POINTER(_VSM_data)]
+_VSC_Main.restype = POINTER(_VSC_C_main)
+
+_VSC_iter_f = CFUNCTYPE(c_int, c_void_p, POINTER(_VSC_Point))
+_VSC_Iter = varnishapi.VSC_Iter
+_VSC_Iter.argtypes = [POINTER(_VSM_data), _VSC_iter_f, py_object]
+_VSC_Iter.restype = c_int
+
+# logs
+_VSL_S_CLIENT = (1 << 0)
+_VSL_S_BACKEND = (1 << 1)
+_VSL_tags_len = 256
+_VSL_tags = (c_char_p * _VSL_tags_len).in_dll(varnishapi, 'VSL_tags')
+
+try:
+    _VSL_Name2Tag = varnishapi.VSL_Name2Tag
+    _VSL_Name2Tag.argtypes = [c_char_p, c_int]
+    _VSL_Name2Tag.restype = c_int
+
+except AttributeError:
+    _VSL_Name2Tag = None
+
+_VSL_Setup = varnishapi.VSL_Setup
+_VSL_Setup.argtypes = [POINTER(_VSM_data)]
+_VSL_Setup.restype = None
+
+_VSL_Open = varnishapi.VSL_Open
+_VSL_Open.argtypes = [POINTER(_VSM_data), c_int]
+_VSL_Open.restype = c_int
+
+# TODO: define enum_vsl_tag!
+                        # return priv,     tag,   fd,
+                        # len,    spec,   ptr,      bitmap
+_VSL_handler_f = CFUNCTYPE(c_int, c_void_p, c_int, c_uint,
+                           c_uint, c_uint, c_char_p, c_uint64)
+_VSL_Dispatch = varnishapi.VSL_Dispatch
+_VSL_Dispatch.argtypes = [POINTER(_VSM_data), _VSL_handler_f, py_object]
+_VSL_Dispatch.restype = c_int
+
+
+__all__ = ['varnishapi', 'init', 'close', 'delete', 'set_diagnostic_function',
+           'clear_diagnostic_function', 'access_instance', 'stats_open',
+           'stats_setup', 'stats_main', 'stats_init', 'stats_iterate',
+           'stats_filter', 'stats_exclude']
 
 
 class VarnishStatsPoint(object):
@@ -96,53 +183,82 @@ class VarnishStatsPoint(object):
         return self.full_name == other.full_name
 
 
-_VSM_New = varnishapi.VSM_New
-_VSM_New.argtypes = []
-_VSM_New.restype = POINTER(_VSM_data)
-
-_VSM_diag_f = CFUNCTYPE(None, c_void_p)
-_VSM_Diag = varnishapi.VSM_Diag
-_VSM_Diag.argtypes = [POINTER(_VSM_data), _VSM_diag_f, py_object]
-_VSM_Diag.restype = None
-
-_VSM_n_Arg = varnishapi.VSM_n_Arg
-_VSM_n_Arg.argtypes = [POINTER(_VSM_data), c_char_p]
-_VSM_n_Arg.restype = c_int
-
-_VSM_Close = varnishapi.VSM_Close
-_VSM_Close.argtypes = [POINTER(_VSM_data)]
-_VSM_Close.restype = None
-
-_VSM_Delete = varnishapi.VSM_Close
-_VSM_Delete.argtypes = [POINTER(_VSM_data)]
-_VSM_Delete.restype = None
-
-_VSC_Setup = varnishapi.VSC_Setup
-_VSC_Setup.argtypes = [POINTER(_VSM_data)]
-_VSC_Setup.restype = None
-
-_VSC_Open = varnishapi.VSC_Open
-_VSC_Open.argtypes = [POINTER(_VSM_data), c_int]
-_VSC_Open.restype = c_int
-
-_VSC_Arg = varnishapi.VSC_Arg
-_VSC_Arg.argtypes = [POINTER(_VSM_data), c_int, c_char_p]
-_VSC_Arg.restype = c_int
-
-_VSC_Main = varnishapi.VSC_Main
-_VSC_Main.argtypes = [POINTER(_VSM_data)]
-_VSC_Main.restype = POINTER(_VSC_C_main)
-
-_VSC_iter_f = CFUNCTYPE(c_int, c_void_p, POINTER(_VSC_Point))
-_VSC_Iter = varnishapi.VSC_Iter
-_VSC_Iter.argtypes = [POINTER(_VSM_data), _VSC_iter_f, py_object]
-_VSC_Iter.restype = c_int
+LogTag = collections.namedtuple('LogTag', ['code', 'name'])
 
 
-__all__ = ['varnishapi', 'init', 'close', 'delete', 'set_diagnostic_function',
-           'clear_diagnostic_function', 'access_instance', 'stats_open',
-           'stats_setup', 'stats_main', 'stats_init', 'stats_iterate',
-           'stats_filter', 'stats_exclude']
+class LogTags(collections.Mapping):
+
+    def __new__(cls):
+        if '_inst' not in vars(cls):
+            cls._inst = super(LogTags, cls).__new__(cls)
+            cls._inst._tags_by_code = dict()
+            cls._inst._tags_by_name = dict()
+            for code in xrange(_VSL_tags_len):
+                name = _VSL_tags[code]
+                if not name is None:
+                    tag = LogTag(code=code, name=name)
+                    cls._inst._tags_by_code[code] = tag
+                    cls._inst._tags_by_name[name] = tag
+
+        return cls._inst
+
+    def _to_code(self, key):
+        if isinstance(key, basestring):
+            if _VSL_Name2Tag:
+                res = _VSL_Name2Tag(key, -1)
+                if res == -1:
+                    return KeyError('No tag %s' % key)
+
+                if res == -2:
+                    raise KeyError("Multiple code for %s" % key)
+
+                return res
+            else:
+                return self._tags_by_name[key].code
+
+        else:
+            return key
+
+    def __getitem__(self, key):
+        key = self._to_code(key)
+        return LogTag(code=key, name=self._tags_by_code[key])
+
+    def __iter__(self):
+        return iter(self._tags_by_name)
+
+    def __contains__(self, key):
+        key = self._to_code(key)
+        return key in self._tags_by_code
+
+    def __len__(self):
+        return len(self._tags_by_code)
+
+    def __str__(self):
+        return repr(self)
+
+    def __repr__(self):
+        return repr(self._tags_by_name)
+
+
+class LogChunk(object):
+    """ Python object that represent a log entry """
+
+    def __init__(self, tag, fd, len_, spec, ptr, bitmap):
+        self.tag = LogTags()[tag]
+        self.fd = int(fd)  # file descriptor associated with this record
+        self.client = spec == _VSL_S_CLIENT
+        self.backend = spec == _VSL_S_BACKEND
+        self.data = str(ptr)
+        assert len(self.data) == len_
+        self.bitmap = int(bitmap)
+
+    def __str__(self):
+        type_ = "client" if self.client else "backend"
+        return "<LogChunk [%s] tag: %s data: %s>" % (type_, self.tag,
+                                                     self.data)
+
+    def __repr__(self):
+        return str(self)
 
 
 def init():
@@ -217,7 +333,7 @@ def stats_main(varnish_handle):
 def stats_init(varnish_handle, diagnostic=False):
     """ Shortcut function for stats processing setup """
     stats_setup(varnish_handle)
-    stats_open(varnish_handle)
+    stats_open(varnish_handle, diagnostic)
     return stats_main(varnish_handle)
 
 
@@ -278,3 +394,60 @@ def stats_filter(varnish_handle, name, exclude=False):
 
 def stats_exclude(varnish_handle, name):
     stats_filter(varnish_handle, name, exclude=True)
+
+
+def logs_setup(varnish_handle):
+    """ Setup handle for use with logs functions """
+    _VSL_Setup(varnish_handle)
+
+
+def logs_open(varnish_handle, diagnostic=False):
+    """ Attempt to open and map the shared memory file. """
+    diag = 1 if diagnostic else 0
+    if _VSL_Open(varnish_handle, diag) != 0:
+        raise VarnishException('Error open shared memory for logs processing')
+
+
+def logs_init(varnish_handle, diagnostic=False):
+    """ Shortcut function for logs processing setup """
+    logs_setup(varnish_handle)
+    logs_open(varnish_handle, diagnostic)
+
+
+def logs_name_to_tag(name, match_length=-1):
+    """ Converts a name to a log tag code.
+        match_length == -1 means len(name)
+        Returns -1 if no tag matches
+                -2 if multiple matches are found
+                >= 0 tag code
+    """
+    return _VSL_Name2Tag(name, match_length)
+
+# TODO: add filters!
+
+
+def logs_dispatch(varnish_handle, callback, private_data=None):
+    def _callback(priv, tag, fd, len_, spec, ptr, bitmap):
+        if priv:
+            priv = ctypes.cast(priv, py_object).value
+
+        lchunk = LogChunk(tag, fd, len_, spec, ptr, bitmap)
+        try:
+            args = len(inspect.getargspec(callback).args)
+            res = 1
+            if args == 1:
+                res = callback(lchunk)
+
+            else:
+                res = callback(lchunk, priv)
+
+        finally:
+            if res is None:
+                res = 0
+            return  res
+
+    c_callback = _VSL_handler_f(_callback)
+    if not private_data is None:
+        private_data = py_object(private_data)
+
+    return _VSL_Dispatch(varnish_handle, c_callback, private_data)
