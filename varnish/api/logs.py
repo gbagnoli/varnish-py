@@ -29,8 +29,7 @@ from .vsm import _VSM_data
 from ..exc import VarnishException
 
 
-__all__ = ['logs_setup', 'logs_init', 'logs_open', 'logs_name_to_tag',
-           'logs_dispatch', 'LogTags']
+__all__ = ['setup', 'init', 'open_', 'name_to_tag', 'dispatch', 'LogTags']
 varnishapi = ctypes.CDLL('libvarnishapi.so')
 
 
@@ -149,25 +148,25 @@ _VSL_Dispatch.argtypes = [ctypes.POINTER(_VSM_data),
 _VSL_Dispatch.restype = ctypes.c_int
 
 
-def logs_setup(varnish_handle):
+def setup(varnish_handle):
     """ Setup handle for use with logs functions """
     _VSL_Setup(varnish_handle)
 
 
-def logs_open(varnish_handle, diagnostic=False):
+def open_(varnish_handle, diagnostic=False):
     """ Attempt to open and map the shared memory file. """
     diag = 1 if diagnostic else 0
     if _VSL_Open(varnish_handle, diag) != 0:
         raise VarnishException('Error open shared memory for logs processing')
 
 
-def logs_init(varnish_handle, diagnostic=False):
+def init(varnish_handle, diagnostic=False):
     """ Shortcut function for logs processing setup """
-    logs_setup(varnish_handle)
-    logs_open(varnish_handle, diagnostic)
+    setup(varnish_handle)
+    open_(varnish_handle, diagnostic)
 
 
-def logs_name_to_tag(name, match_length=-1):
+def name_to_tag(name, match_length=-1):
     """ Converts a name to a log tag code.
         match_length == -1 means len(name)
         Returns -1 if no tag matches
@@ -178,7 +177,7 @@ def logs_name_to_tag(name, match_length=-1):
 
 
 # TODO: add filters!
-def logs_dispatch(varnish_handle, callback, private_data=None):
+def dispatch(varnish_handle, callback, private_data=None):
     def _callback(priv, tag, fd, len_, spec, ptr, bitmap):
         if priv:
             priv = ctypes.cast(priv, ctypes.py_object).value

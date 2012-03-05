@@ -24,5 +24,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
 from .vsm import *
-from .stats import *
-from .logs import *
+import stats
+import logs
+
+stats = stats
+logs = logs

@@ -29,8 +29,7 @@ from ..exc import (VarnishException,
 from .vsm import _VSM_data
 
 
-__all__ = ['stats_open', 'stats_main', 'stats_setup', 'stats_init',
-           'stats_iterate', 'stats_filter', 'stats_exclude']
+__all__ = ['open_', 'main', 'setup', 'init', 'iterate', 'filter_', 'exclude']
 varnishapi = ctypes.CDLL('libvarnishapi.so')
 
 
@@ -110,19 +109,19 @@ _VSC_Iter.argtypes = [ctypes.POINTER(_VSM_data), _VSC_iter_f, ctypes.py_object]
 _VSC_Iter.restype = ctypes.c_int
 
 
-def stats_setup(varnish_handle):
+def setup(varnish_handle):
     """ Setup handle for use with stats functions """
     _VSC_Setup(varnish_handle)
 
 
-def stats_open(varnish_handle, diagnostic=False):
+def open_(varnish_handle, diagnostic=False):
     """ Open shared memory for stats processing """
     diag = 1 if diagnostic else 0
     if _VSC_Open(varnish_handle, diag) != 0:
         raise VarnishException('Error open shared memory for stats processing')
 
 
-def stats_main(varnish_handle):
+def main(varnish_handle):
     """ Return the main  handle """
     stats_handle = _VSC_Main(varnish_handle)
     if stats_handle is None:
@@ -131,14 +130,14 @@ def stats_main(varnish_handle):
     return stats_handle
 
 
-def stats_init(varnish_handle, diagnostic=False):
+def init(varnish_handle, diagnostic=False):
     """ Shortcut function for stats processing setup """
-    stats_setup(varnish_handle)
-    stats_open(varnish_handle, diagnostic)
-    return stats_main(varnish_handle)
+    setup(varnish_handle)
+    open_(varnish_handle, diagnostic)
+    return main(varnish_handle)
 
 
-def stats_iterate(varnish_handle, callback, private_data=None):
+def iterate(varnish_handle, callback, private_data=None):
     """ Iterate over all statistics counters calling callback for each counters
         not filtered out by pre-set filters
     """
@@ -180,7 +179,7 @@ def stats_iterate(varnish_handle, callback, private_data=None):
     _VSC_Iter(varnish_handle, c_callback, private_data)
 
 
-def stats_filter(varnish_handle, name, exclude=False):
+def filter_(varnish_handle, name, exclude=False):
     if exclude:
         name = "^%s" % (name)
 
@@ -192,5 +191,5 @@ def stats_filter(varnish_handle, name, exclude=False):
         raise VarnishUnHandledException('Filter "f" unhandled: %s' % (name))
 
 
-def stats_exclude(varnish_handle, name):
-    stats_filter(varnish_handle, name, exclude=True)
+def exclude(varnish_handle, name):
+    filter_(varnish_handle, name, exclude=True)

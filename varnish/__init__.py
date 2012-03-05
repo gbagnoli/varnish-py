@@ -54,20 +54,20 @@ class Varnish(object):
         if self._logs_init:
             return
 
-        api.logs_init(self.vd)
+        api.logs.init(self.vd)
         self._logs_init = True
 
     def init_stats(self):
         if self._stats_init:
             return
 
-        api.stats_init(self.vd)
+        api.stats.init(self.vd)
         self._stats_init = True
 
     def read_stats(self):
         self.init_stats()
         stats = list()
-        api.stats_iterate(self.vd,
+        api.stats.iterate(self.vd,
                           lambda point, data: data.append(point), stats)
         return VarnishStats(stats)
 
@@ -76,7 +76,7 @@ class Varnish(object):
             print chunk
 
         self.init_logs()
-        if source != None:
+        if not source is None:
             raise NotImplementedError
 
-        api.logs_dispatch(self.vd, cb)
+        api.logs.dispatch(self.vd, cb)
