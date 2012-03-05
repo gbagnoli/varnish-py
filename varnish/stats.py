@@ -25,9 +25,49 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import collections
 import datetime
+import inspect
+from .api import stats
 
 
-class VarnishStats(collections.Mapping):
+class VarnishStats(object):
+
+    def __init__(self, varnish):
+        self.varnish = varnish
+        self.vd = varnish.vd
+        stats.init(self.vd)
+
+    def read(self, callback=None):
+        if callback:
+            args = len(inspect.getargspec(callback).args)
+
+        def wrapper(point, data):
+            data.append(point)
+            if callback and args == 0:
+                if callback:
+                    callback()
+
+            elif callback:
+                callback(point)
+
+        stats_list = list()
+        stats.iterate(self.vd, wrapper, stats_list)
+        return VarnishStatsReading(stats_list)
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.read()
+
+    def __str__(self):
+        return "<%s [instance: %s]>" % (self.__class__.__name__,
+                                        self.varnish.name)
+
+    def __repr__(self):
+        return str(self)
+
+
+class VarnishStatsReading(collections.Mapping):
     def __init__(self, points):
         object.__setattr__(self, "timestamp", datetime.datetime.utcnow())
         object.__setattr__(self, "_points", {})
@@ -47,11 +87,13 @@ class VarnishStats(collections.Mapping):
         return obj in self._points
 
     def __str__(self):
-        return "<VarnishStats[%s] - %s elements>" % (self.timestamp, len(self))
+        return "<%s[%s] - %s elements>" % (self.__class__.__name__,
+                                           self.timestamp, len(self))
 
     def __repr__(self):
-        return "<VarnishStats[%s] - %s" % (self.timestamp, self._points)
+        return "<%s[%s] - %s>" % (self.__class__.__name__,
+                                 self.timestamp, self._points)
 
     def __setattr__(self, attr, value):
-        raise TypeError("VarnishStats' object does not support "
-                        "attribute assignment")
+        raise TypeError("'%s' object does not support "
+                        "attribute assignment" % (self.__class__.__name__))

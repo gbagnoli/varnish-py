@@ -24,7 +24,6 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 import collections
 import ctypes
-import inspect
 from .vsm import _VSM_data
 from ..exc import VarnishException
 
@@ -184,13 +183,7 @@ def dispatch(varnish_handle, callback, private_data=None):
 
         lchunk = LogChunk(tag, fd, len_, spec, ptr, bitmap)
         try:
-            args = len(inspect.getargspec(callback).args)
-            res = 1
-            if args == 1:
-                res = callback(lchunk)
-
-            else:
-                res = callback(lchunk, priv)
+            res = callback(lchunk, priv)
 
         finally:
             if res is None:

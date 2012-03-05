@@ -23,7 +23,6 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 import ctypes
-import inspect
 from ..exc import (VarnishException,
                    VarnishUnHandledException)
 from .vsm import _VSM_data
@@ -146,17 +145,9 @@ def iterate(varnish_handle, callback, private_data=None):
         if priv:
             priv = ctypes.cast(priv, ctypes.py_object).value
 
-        args = len(inspect.getargspec(callback).args)
         try:
             res = 1
-            if args == 0:
-                callback()
-
-            elif args == 1:
-                callback(value)
-
-            else:
-                callback(value, priv)
+            callback(value, priv)
 
         except StopIteration:
             res = 1

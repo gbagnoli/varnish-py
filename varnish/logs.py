@@ -22,47 +22,42 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
-
-from .utils import setup_logging
-from . import api
-from .stats import VarnishStats
-from .logs import VarnishLogs
-
-__version__ = (0, 0, 0, 'dev', 0)
-setup_logging()
-__all__ = ['Varnish']
+import inspect
+from .api import logs
 
 
-class Varnish(object):
+class VarnishLogs(object):
 
-    def __init__(self, name=None):
-        self.vd = api.init()
-        self._name = name
-        if self._name:
-            api.access_instance(self.vd, self._name)
+    def __init__(self, varnish):
+        self.varnish = varnish
+        self.vd = varnish.vd
+        logs.init(self.vd)
 
-    def __del__(self):
-        try:
-            api.close(self.vd)
-            api.delete(self.vd)
+    def read(self, callback=None):
+        if callback:
+            args = len(inspect.getargspec(callback).args)
 
-        except:
-            pass
+        def wrapper(chunk, priv):
+            if callback and args == 0:
+                callback()
 
-    @property
-    def name(self):
-        return self._name or "default"
+            elif callback:
+                callback(chunk)
 
-    @property
-    def stats(self):
-        if not hasattr(self, "_stats"):
-            self._stats = VarnishStats(self)
+        if hasattr(self, 'source'):
+            raise NotImplemented
 
-        return self._stats
+        logs.dispatch(self.vd, wrapper)
 
-    @property
-    def logs(self):
-        if not hasattr(self, '_logs'):
-            self._logs = VarnishLogs(self)
+    def __iter__(self):
+        return self
 
-        return self._logs
+    def next(self):
+        return self.read()
+
+    def __str__(self):
+        return "<%s [instance: %s]>" % (self.__class__.__name__,
+                                        self.varnish.name)
+
+    def __repr__(self):
+        return str(self)
