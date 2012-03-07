@@ -84,14 +84,14 @@ class VarnishLogs(object):
 
 
 class RequestLog(object):
+    """ This class is a factory for its subclasses. It keeps returning the
+        same objects as long as the chunk belongs to an existing instance.
+        It returns None if the chunk belongs to neither a client of backend
+        request
+    """
     _lines = {}
 
     def __new__(cls, chunk, active=False):
-        """ This class is a factory for its subclasses. It keeps returning the
-            same objects as long as the chunk belongs to an existing instance.
-            It returns None if the chunk belongs to neither a client of backend
-            request
-        """
         if chunk.fd in cls._lines:
             obj = cls._lines[chunk.fd]
 
@@ -196,6 +196,7 @@ class RequestLog(object):
 
 class ClientRequestLog(RequestLog):
     """ Aggragates chunks for a client request """
+
     def init(self, chunk, active=False):
         super(ClientRequestLog, self).init(chunk, active)
         self.id = None
@@ -279,6 +280,7 @@ class ClientRequestLog(RequestLog):
 
 class BackendRequestLog(RequestLog):
     """ Aggragates chunks for a backend request """
+
     def init(self, chunk, active=False):
         super(BackendRequestLog, self).init(chunk, active)
         self.backend_name = None
