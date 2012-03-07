@@ -101,15 +101,14 @@ class LogChunk(object):
         self.fd = int(fd)  # file descriptor associated with this record
         self.client = spec == _VSL_S_CLIENT
         self.backend = spec == _VSL_S_BACKEND
-        self.data = str(ptr)
-        #assert len(self.data) == len_
+        self.data = str(ptr)[0:len_]
         self.bitmap = int(bitmap)
 
     def __str__(self):
         type_ = "client" if self.client else "backend"
         return "<LogChunk [%s] [%s] [%s]: %s>" % (self.fd, type_,
                                                   self.tag.name,
-                                                  self.data.strip()[:-1])
+                                                  self.data.strip())
 
     def __repr__(self):
         return str(self)
@@ -152,11 +151,15 @@ _VSL_Dispatch.restype = ctypes.c_int
 
 def setup(varnish_handle):
     """ Setup handle for use with logs functions """
+    log.debug("Setting up handle at %s for use with log functions",
+              varnish_handle)
     _VSL_Setup(varnish_handle)
 
 
 def open_(varnish_handle, diagnostic=False):
     """ Attempt to open and map the shared memory file. """
+    log.debug("Opening and mapping handle at %s for use with log functions",
+              varnish_handle)
     diag = 1 if diagnostic else 0
     if _VSL_Open(varnish_handle, diag) != 0:
         raise VarnishException('Error open shared memory for logs processing')
@@ -209,4 +212,5 @@ def dispatch(varnish_handle, callback, private_data=None):
     if not private_data is None:
         private_data = ctypes.py_object(private_data)
 
+    log.debug("Calling dispatch with callback at %s", callback)
     return _VSL_Dispatch(varnish_handle, c_callback, private_data)
