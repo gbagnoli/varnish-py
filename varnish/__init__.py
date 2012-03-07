@@ -31,11 +31,11 @@ from .logs import VarnishLogs
 
 __version__ = (0, 0, 0, 'dev', 0)
 setup_logging()
-__all__ = ['Varnish']
+__all__ = ['Instance']
 log = logging.getLogger(__name__)
 
 
-class Varnish(object):
+class Instance(object):
 
     def __init__(self, name=None, log_level=None):
         self.vd = api.init()
@@ -44,17 +44,17 @@ class Varnish(object):
             log_method = getattr(log, log_level)
             api.set_diagnostic_function(self.vd, log_method, None)
 
-        #api.open(self.vd, True)
-
         self._name = name
         if self._name:
             api.access_instance(self.vd, self._name)
 
+    def close(self):
+        api.close(self.vd)
+        api.delete(self.vd)
+
     def __del__(self):
         try:
-            api.close(self.vd)
-            api.delete(self.vd)
-
+            self.close()
         except:
             pass
 
