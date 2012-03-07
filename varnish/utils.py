@@ -27,25 +27,25 @@ import logging
 __all__ = ['setup_logging']
 
 
+class _NullHandler(logging.Handler):
+    level = None
+
+    def emit(self, record):
+        pass
+
+    @classmethod
+    def handle(cls, record):
+        pass
+
+    def createLock(self):
+        return None
+
+
 def setup_logging():
     """ Setup logging adding a NullHandler, since logging configuration is
         a task done by the application itself.
         Prefer the logging.NullHandler handler if present (py>=2.7)
     """
 
-    class _NullHandler(logging.Handler):
-        def emit(self, record):
-            pass
-
-        def handle(self, record):
-            pass
-
-        def createLock(self):
-            return None
-
     logger = logging.getLogger('varnish')
-    try:
-        logger.addHandler(logging.NullHandler)
-
-    except AttributeError:
-        logger.addHandler(_NullHandler)
+    logger.addHandler(_NullHandler)
