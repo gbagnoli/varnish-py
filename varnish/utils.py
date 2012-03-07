@@ -232,10 +232,15 @@ class MultiDict(collections.MutableMapping):
 
 def _hide_passwd(items):
     for k, v in items:
-        if ('password' in k
-            or 'passwd' in k
-            or 'pwd' in k
-        ):
-            yield k, '******'
-        else:
+        try:
+            if ('password' in k
+                or 'passwd' in k
+                or 'pwd' in k
+            ):
+                yield k, '******'
+
+            else:
+                yield k, v
+
+        except TypeError:
             yield k, v

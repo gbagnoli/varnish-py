@@ -58,20 +58,43 @@ class VarnishLogs(object):
 
         logs.dispatch(self.vd, wrapper)
 
-    def dispatch_requests(self, callback):
+    def dispatch_requests(self, callback, aggregate=1000):
         """ Read logs from Varnish shared memory Logs, then call callback
             when a RequestLog is complete (all its chunks have been read).
             `callback` must be a callable that accepts 1 positional parameter
             (an instance of ClientRequestLog or BackendRequestLog, subclasses
              of RequestLog)
+            if `aggregate` is true, try to relate backend requests to the
+            client request that generated it
         """
+        if aggregate:
+            # we use a multidict because it is ordered
+            backend_requests = MultiDict()
+
         def cb(chunk):
             ev = RequestLog(chunk)
             # discard invalid, incomplete and empty logs
             if not ev or not ev.complete or (ev.backend and not ev.chunks):
                 return
 
-            callback(ev)
+            if not aggregate:
+                callback(ev)
+
+            elif ev.backend:
+                id_ = ev.txheaders.getone('x-varnish')
+                log.debug("Adding %s to backend_requests", ev)
+                backend_requests.overwrite(id_, ev)
+
+            elif ev.client and ev.id in backend_requests:
+                ev.backend_request = backend_requests.getone(ev.id)
+                callback(ev)
+
+            else:
+                # backend request was not read, leaving to None
+                callback(ev)
+
+            if len(backend_requests) > aggregate:
+                backend_requests.trim(aggregate)
 
         self.dispatch_chunks(callback=cb)
 
@@ -148,7 +171,6 @@ class RequestLog(object):
             self.active = False
             del self.__class__._lines[self.fd]
             if chunk.tag.name == 'backendreuse':
-                log.debug("Found backendreuse")
                 # backend reuse need a special case to get the next backend
                 # request as no backendopen will arrive
                 # then we create a new empry object that we now is active
@@ -168,11 +190,11 @@ class RequestLog(object):
         name = chunk.tag.name
         if name == 'rxheader':
             key, value = chunk.data.split(":", 1)
-            self.rxheaders[key.strip()] = value.strip()
+            self.rxheaders[key.strip().lower()] = value.strip()
 
         elif name == 'txheader':
             key, value = chunk.data.split(":", 1)
-            self.txheaders[key.strip()] = value.strip()
+            self.txheaders[key.strip().lower()] = value.strip()
 
         elif name == 'rxprotocol':
             self.rxprotocol = chunk.data
@@ -182,9 +204,6 @@ class RequestLog(object):
 
         elif name == 'length':
             self.length = int(chunk.data)
-
-    def __str__(self):
-        return "<{self.__class__.__name__} XID: {self.id}>".format(self=self)
 
     def __repr__(self):
         res = "<%s %s" % (self.__class__.__name__, self.id)
@@ -209,6 +228,7 @@ class ClientRequestLog(RequestLog):
         self.req_start_delay = None
         self.processing_time = None
         self.deliver_time = None
+        self.backend_request = None
 
     def on_append_chunk(self, chunk):
         super(ClientRequestLog, self).on_append_chunk(chunk)
@@ -277,6 +297,9 @@ class ClientRequestLog(RequestLog):
 >""".format(self=self)
         return res
 
+    def __str__(self):
+        return "<{self.__class__.__name__} XID: {self.id}>".format(self=self)
+
 
 class BackendRequestLog(RequestLog):
     """ Aggragates chunks for a backend request """
@@ -312,3 +335,7 @@ class BackendRequestLog(RequestLog):
     Response: {self.txprotocol} {self.status} {self.response} [{self.length}B]
         headers   : {self.txheaders}
 >""".format(self=self)
+
+    def __str__(self):
+        return "<{self.__class__.__name__} ({self.backend_name})>"\
+                .format(self=self)
