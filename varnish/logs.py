@@ -37,7 +37,12 @@ class VarnishLogs(object):
         self.vd = varnish.vd
         logs.init(self.vd, True)
 
-    def read(self, callback=None):
+    def dispatch_chunks(self, callback):
+        """ Read logs from varnish shared memory logs, then call callback
+            for every chunk as returned from the low level api
+            `callback` must be a callable that accepts 0 or 1 positional
+            parameter (an instance of the varnish.api.logs.LogChunk class)
+        """
         if callback:
             args = len(inspect.getargspec(callback).args)
 
@@ -53,7 +58,13 @@ class VarnishLogs(object):
 
         logs.dispatch(self.vd, wrapper)
 
-    def readline(self, callback):
+    def dispatch_requests(self, callback):
+        """ Read logs from Varnish shared memory Logs, then call callback
+            when a RequestLog is complete (all its chunks have been read).
+            `callback` must be a callable that accepts 1 positional parameter
+            (an instance of ClientRequestLog or BackendRequestLog, subclasses
+             of RequestLog)
+        """
         def cb(chunk):
             ev = RequestLog(chunk)
             # discard invalid, incomplete and empty logs
@@ -62,7 +73,7 @@ class VarnishLogs(object):
 
             callback(ev)
 
-        self.read(callback=cb)
+        self.dispatch_chunks(callback=cb)
 
     def __str__(self):
         return "<%s [instance: %s]>" % (self.__class__.__name__,
@@ -76,7 +87,11 @@ class RequestLog(object):
     _lines = {}
 
     def __new__(cls, chunk, active=False):
-
+        """ This class is a factory for its subclasses. It keeps returning the
+            same objects as long as the chunk belongs to an existing instance.
+            It returns None if the chunk belongs to neither a client of backend
+            request
+        """
         if chunk.fd in cls._lines:
             obj = cls._lines[chunk.fd]
 
@@ -180,6 +195,7 @@ class RequestLog(object):
 
 
 class ClientRequestLog(RequestLog):
+    """ Aggragates chunks for a client request """
     def init(self, chunk, active=False):
         super(ClientRequestLog, self).init(chunk, active)
         self.id = None
@@ -262,7 +278,7 @@ class ClientRequestLog(RequestLog):
 
 
 class BackendRequestLog(RequestLog):
-
+    """ Aggragates chunks for a backend request """
     def init(self, chunk, active=False):
         super(BackendRequestLog, self).init(chunk, active)
         self.backend_name = None
