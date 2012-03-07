@@ -28,8 +28,9 @@ from ..exc import VarnishException
 
 
 log = logging.getLogger(__name__)
-__all__ = ['init', 'close', 'delete', 'clear_diagnostic_function',
-           'set_diagnostic_function', 'access_instance']
+__all__ = ['init', 'open', 'reopen', 'close', 'delete',
+           'clear_diagnostic_function', 'set_diagnostic_function',
+           'access_instance']
 varnishapi = ctypes.CDLL('libvarnishapi.so')
 
 
@@ -41,6 +42,14 @@ class _VSM_data(ctypes.Structure):
 _VSM_New = varnishapi.VSM_New
 _VSM_New.argtypes = []
 _VSM_New.restype = ctypes.POINTER(_VSM_data)
+
+_VSM_Open = varnishapi.VSM_Open
+_VSM_Open.argtypes = [ctypes.POINTER(_VSM_data), ctypes.c_int]
+_VSM_Open.restype = ctypes.c_int
+
+_VSM_ReOpen = varnishapi.VSM_ReOpen
+_VSM_ReOpen.argtypes = [ctypes.POINTER(_VSM_data), ctypes.c_int]
+_VSM_ReOpen.restype = ctypes.c_int
 
 _VSM_diag_f = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 _VSM_Diag = varnishapi.VSM_Diag
@@ -74,6 +83,20 @@ def init():
     return handle
 
 
+def open(varnish_handle, diagnostic=False):
+    diag = 1 if diagnostic else 0
+    res = _VSM_Open(varnish_handle, diag)
+    if res != 0:
+        raise VarnishException('Failed to open and map shared memory file')
+
+
+def reopen(varnish_handle, diagnostic=False):
+    diag = 1 if diagnostic else 0
+    res = _VSM_ReOpen(varnish_handle, diag)
+    if res < 0:
+        raise VarnishException('Failed to reopen and remap shared memory file')
+
+
 def close(varnish_handle):
     _VSM_Close(varnish_handle)
 
@@ -94,7 +117,7 @@ def set_diagnostic_function(varnish_handle, function, private_data):
     if not private_data is None:
         private_data = ctypes.py_object(private_data)
 
-    _VSM_Diag(varnish_handle, c_function, ctypes.py_object(private_data))
+    _VSM_Diag(varnish_handle, c_function, private_data)
 
 
 def clear_diagnostic_function(varnish_handle):
