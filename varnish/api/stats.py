@@ -23,6 +23,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 import ctypes
+import logging
 from ..exc import (VarnishException,
                    VarnishUnHandledException)
 from .vsm import _VSM_data
@@ -30,6 +31,7 @@ from .vsm import _VSM_data
 
 __all__ = ['open_', 'main', 'setup', 'init', 'iterate', 'filter_', 'exclude']
 varnishapi = ctypes.CDLL('libvarnishapi.so')
+log = logging.getLogger(__name__)
 
 
 class _VSC_C_main(ctypes.Structure):
@@ -154,6 +156,7 @@ def iterate(varnish_handle, callback, private_data=None):
 
         except Exception as e:
             res = 1  # FIXME: errors seems masked!
+            log.exception("Error while calling callback")
             raise e
 
         else:
