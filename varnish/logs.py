@@ -68,26 +68,20 @@ class VarnishLogs(object):
 class LogLine(object):
     _lines = {}
 
-    def __new__(cls, fd):
+    def __new__(cls, fd, active=False):
 
-        if fd in cls._lines and isinstance(cls._lines[fd], LogLine):
+        if fd in cls._lines:
             return cls._lines[fd]
 
         obj = super(LogLine, cls).__new__(cls)
         obj.fd = fd
         obj.chunks = []
-        obj.active = False
+        obj.active = active
         obj.complete = False
-        if fd in cls._lines:
-            # fs is still in _lines, special case for "new but start active"
-            # usend on backendreuse
-            obj.active = True
-
         cls._lines[fd] = obj
         return obj
 
     def add_chunk(self, chunk):
-
         if self.fd == 0:
             return False
 
@@ -103,14 +97,14 @@ class LogLine(object):
            (chunk.backend and (chunk.tag.name == 'backendclose' or
                                chunk.tag.name == 'backendreuse')):
             self.complete = True
+            self.active = False
+            del self.__class__._lines[self.fd]
             if chunk.tag.name == 'backendreuse':
                 # backend reuse need a special case to get the next backend
-                # request, to set it as active as soon as it is created
-                # as no backendopen is there
-                self.__class__._lines[self.fd] = True
-
-            else:
-                del self.__class__._lines[self.fd]
+                # request as no backendopen will arrive
+                # then we create a new empry object that we now is active
+                next_backend = LogLine(self.fd, active=True)
+                next_backend.chunks.append(chunk)
 
         self.chunks.append(chunk)
         return self.complete
