@@ -24,12 +24,14 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 import collections
 import ctypes
+import logging
 from .vsm import _VSM_data
 from ..exc import VarnishException
 
 
 __all__ = ['setup', 'init', 'open_', 'name_to_tag', 'dispatch', 'LogTags']
 varnishapi = ctypes.CDLL('libvarnishapi.so')
+log = logging.getLogger(__name__)
 
 
 LogTag = collections.namedtuple('LogTag', ['code', 'name'])
@@ -100,13 +102,14 @@ class LogChunk(object):
         self.client = spec == _VSL_S_CLIENT
         self.backend = spec == _VSL_S_BACKEND
         self.data = str(ptr)
-        assert len(self.data) == len_
+        #assert len(self.data) == len_
         self.bitmap = int(bitmap)
 
     def __str__(self):
         type_ = "client" if self.client else "backend"
-        return "<LogChunk [%s] tag: %s data: %s>" % (type_, self.tag,
-                                                     self.data)
+        return "<LogChunk [%s] [%s] [%s]: %s>" % (self.fd, type_,
+                                                  self.tag.name,
+                                                  self.data.strip()[:-1])
 
     def __repr__(self):
         return str(self)
@@ -172,7 +175,14 @@ def name_to_tag(name, match_length=-1):
                 -2 if multiple matches are found
                 >= 0 tag code
     """
-    return _VSL_Name2Tag(name, match_length)
+    try:
+        tagcode = LogTags()[name]
+
+    except KeyError:
+        return -1
+
+    else:
+        return tagcode
 
 
 # TODO: add filters!
@@ -182,13 +192,18 @@ def dispatch(varnish_handle, callback, private_data=None):
             priv = ctypes.cast(priv, ctypes.py_object).value
 
         lchunk = LogChunk(tag, fd, len_, spec, ptr, bitmap)
+        res = 1
         try:
             res = callback(lchunk, priv)
 
+        except:
+            log.exception('Error while calling callback')
+
         finally:
+
             if res is None:
                 res = 0
-            return  res
+            return res
 
     c_callback = _VSL_handler_f(_callback)
     if not private_data is None:

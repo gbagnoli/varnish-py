@@ -31,7 +31,7 @@ class VarnishLogs(object):
     def __init__(self, varnish):
         self.varnish = varnish
         self.vd = varnish.vd
-        logs.init(self.vd)
+        logs.init(self.vd, True)
 
     def read(self, callback=None):
         if callback:
@@ -49,11 +49,13 @@ class VarnishLogs(object):
 
         logs.dispatch(self.vd, wrapper)
 
-    def __iter__(self):
-        return self
+    def readline(self, callback):
+        def cb(chunk):
+            line = LogLine(chunk.fd)
+            if line.add_chunk(chunk):
+                callback(line)
 
-    def next(self):
-        return self.read()
+        self.read(callback=cb)
 
     def __str__(self):
         return "<%s [instance: %s]>" % (self.__class__.__name__,
@@ -61,3 +63,61 @@ class VarnishLogs(object):
 
     def __repr__(self):
         return str(self)
+
+
+class LogLine(object):
+    _lines = {}
+
+    def __new__(cls, fd):
+
+        if fd in cls._lines and isinstance(cls._lines[fd], LogLine):
+            return cls._lines[fd]
+
+        obj = super(LogLine, cls).__new__(cls)
+        obj.fd = fd
+        obj.chunks = []
+        obj.active = False
+        obj.complete = False
+        if fd in cls._lines:
+            # fs is still in _lines, special case for "new but start active"
+            # usend on backendreuse
+            obj.active = True
+
+        cls._lines[fd] = obj
+        return obj
+
+    def add_chunk(self, chunk):
+
+        if self.fd == 0:
+            return False
+
+        if not self.active and \
+            ((chunk.client and chunk.tag.name == 'reqstart') or
+             (chunk.backend and chunk.tag.name == 'backendopen')):
+            self.active = True
+
+        elif not self.active:
+            return False
+
+        if (chunk.client and chunk.tag.name == 'reqend') or \
+           (chunk.backend and (chunk.tag.name == 'backendclose' or
+                               chunk.tag.name == 'backendreuse')):
+            self.complete = True
+            if chunk.tag.name == 'backendreuse':
+                # backend reuse need a special case to get the next backend
+                # request, to set it as active as soon as it is created
+                # as no backendopen is there
+                self.__class__._lines[self.fd] = True
+
+            else:
+                del self.__class__._lines[self.fd]
+
+        self.chunks.append(chunk)
+        return self.complete
+
+    def __str__(self):
+        res = "<%s %s" % (self.__class__.__name__, self.fd)
+        for c in self.chunks:
+            res += "\n\t%s" % (c)
+        res += ">"
+        return res

@@ -23,6 +23,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
+import logging
 from .utils import setup_logging
 from . import api
 from .stats import VarnishStats
@@ -31,12 +32,20 @@ from .logs import VarnishLogs
 __version__ = (0, 0, 0, 'dev', 0)
 setup_logging()
 __all__ = ['Varnish']
+log = logging.getLogger(__name__)
 
 
 class Varnish(object):
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, log_level=None):
         self.vd = api.init()
+        if log_level:
+            log_level = log_level.lower()
+            log_method = getattr(log, log_level)
+            api.set_diagnostic_function(self.vd, log_method, None)
+
+        #api.open(self.vd, True)
+
         self._name = name
         if self._name:
             api.access_instance(self.vd, self._name)
@@ -48,6 +57,12 @@ class Varnish(object):
 
         except:
             pass
+
+    def open(self, verbose=False):
+        api.open(self.vd, verbose)
+
+    def reopen(self, verbose=False):
+        api.open(self.vd, verbose)
 
     @property
     def name(self):
@@ -62,6 +77,9 @@ class Varnish(object):
 
     @property
     def logs(self):
+        """ Accessing logs using the same instance used to read stats will
+            result in an assertion failure in varnish <= 3.0.2
+        """
         if not hasattr(self, '_logs'):
             self._logs = VarnishLogs(self)
 
