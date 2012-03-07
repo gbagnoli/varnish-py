@@ -22,8 +22,12 @@ LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
+from datetime import datetime
 import inspect
+import logging
 from .api import logs
+from .utils import MultiDict
+log = logging.getLogger(__name__)
 
 
 class VarnishLogs(object):
@@ -51,9 +55,12 @@ class VarnishLogs(object):
 
     def readline(self, callback):
         def cb(chunk):
-            line = LogLine(chunk.fd)
-            if line.add_chunk(chunk):
-                callback(line)
+            ev = RequestLog(chunk)
+            # discard invalid, incomplete and empty logs
+            if not ev or not ev.complete or (ev.backend and not ev.chunks):
+                return
+
+            callback(ev)
 
         self.read(callback=cb)
 
@@ -65,21 +72,47 @@ class VarnishLogs(object):
         return str(self)
 
 
-class LogLine(object):
+class RequestLog(object):
     _lines = {}
 
-    def __new__(cls, fd, active=False):
+    def __new__(cls, chunk, active=False):
 
-        if fd in cls._lines:
-            return cls._lines[fd]
+        if chunk.fd in cls._lines:
+            obj = cls._lines[chunk.fd]
 
-        obj = super(LogLine, cls).__new__(cls)
-        obj.fd = fd
-        obj.chunks = []
-        obj.active = active
-        obj.complete = False
-        cls._lines[fd] = obj
+        else:
+            if chunk.client:
+                obj = super(RequestLog, cls).__new__(ClientRequestLog)
+
+            elif chunk.backend:
+                obj = super(RequestLog, cls).__new__(BackendRequestLog)
+
+            else:
+                return None
+
+            obj.init(chunk, active)
+            cls._lines[chunk.fd] = obj
+
+        obj.add_chunk(chunk)
         return obj
+
+    def init(self, chunk, active=False):
+        if hasattr(self, "fd"):
+            return
+
+        self.fd = chunk.fd
+        self.chunks = []
+        self.active = active
+        self.complete = False
+        self.rxheaders = MultiDict()
+        self.txheaders = MultiDict()
+        self.rxprotocol = None
+        self.txprotocol = None
+        self.method = None
+        self.url = None
+        self.status = None
+        self.response = None
+        self.length = None
 
     def add_chunk(self, chunk):
         if self.fd == 0:
@@ -100,18 +133,164 @@ class LogLine(object):
             self.active = False
             del self.__class__._lines[self.fd]
             if chunk.tag.name == 'backendreuse':
+                log.debug("Found backendreuse")
                 # backend reuse need a special case to get the next backend
                 # request as no backendopen will arrive
                 # then we create a new empry object that we now is active
-                next_backend = LogLine(self.fd, active=True)
-                next_backend.chunks.append(chunk)
+                next_backend = super(RequestLog, self.__class__)\
+                                        .__new__(BackendRequestLog)
+                next_backend.init(chunk, active=True)
+                self.__class__._lines[chunk.fd] = next_backend
+                next_backend.on_append_chunk(chunk)
 
-        self.chunks.append(chunk)
+        self.on_append_chunk(chunk)
         return self.complete
 
+    def on_append_chunk(self, chunk):
+        self.client = chunk.client
+        self.backend = chunk.backend
+        self.chunks.append(chunk)
+        name = chunk.tag.name
+        if name == 'rxheader':
+            key, value = chunk.data.split(":", 1)
+            self.rxheaders[key.strip()] = value.strip()
+
+        elif name == 'txheader':
+            key, value = chunk.data.split(":", 1)
+            self.txheaders[key.strip()] = value.strip()
+
+        elif name == 'rxprotocol':
+            self.rxprotocol = chunk.data
+
+        elif name == 'txprotocol':
+            self.txprotocol = chunk.data
+
+        elif name == 'length':
+            self.length = int(chunk.data)
+
     def __str__(self):
-        res = "<%s %s" % (self.__class__.__name__, self.fd)
+        return "<{self.__class__.__name__} XID: {self.id}>".format(self=self)
+
+    def __repr__(self):
+        res = "<%s %s" % (self.__class__.__name__, self.id)
         for c in self.chunks:
             res += "\n\t%s" % (c)
         res += ">"
         return res
+
+
+class ClientRequestLog(RequestLog):
+    def init(self, chunk, active=False):
+        super(ClientRequestLog, self).init(chunk, active)
+        self.id = None
+        self.vcl_calls = MultiDict()
+        self.hash_data = []
+        self.client_ip = None
+        self.client_port = None
+        self.started_at = None
+        self.completed_at = None
+        self.req_start_delay = None
+        self.processing_time = None
+        self.deliver_time = None
+
+    def on_append_chunk(self, chunk):
+        super(ClientRequestLog, self).on_append_chunk(chunk)
+        name = chunk.tag.name
+
+        if name == 'vcl_call':
+            self._last_vcl = chunk.data
+
+        elif name == 'vcl_return':
+            self.vcl_calls[self._last_vcl] = chunk.data
+            del self._last_vcl
+
+        elif name == 'hash':
+            self.hash_data.append(chunk.data)
+
+        elif name == 'length':
+            self.length = int(chunk.data)
+
+        elif name == 'rxrequest':
+            self.method = chunk.data
+
+        elif name == 'rxurl':
+            self.url = chunk.data
+
+        elif name == 'reqstart':
+            self.client_ip, self.client_port, self.id = \
+                chunk.data.split(" ")
+
+        elif name == 'txstatus':
+            self.status = int(chunk.data)
+
+        elif name == 'txresponse':
+            self.response = chunk.data
+
+        elif name == 'reqend':
+            xid, started_at, completed_at, \
+                req_start_delay, processing_time, \
+                deliver_time = chunk.data.split(" ")
+            assert self.id == xid
+            self.started_at = datetime.fromtimestamp(float(started_at))
+            self.completed_at = datetime.fromtimestamp(float(completed_at))
+            self.req_start_delay = float(req_start_delay)
+            self.processing_time = float(processing_time)
+            self.deliver_time = float(deliver_time)
+
+    def __repr__(self):
+        res = """
+<{self.__class__.__name__} XID: {self.id}
+    Client: {self.client_ip}:{self.client_port}
+
+    Timing:
+        started   : {self.started_at}
+        completed : {self.completed_at}
+        delay     : {self.req_start_delay} [s]
+        processing: {self.processing_time} [s]
+        deliver   : {self.deliver_time} [s]
+
+    Request: {self.rxprotocol} {self.method} {self.url}
+        headers   : {self.rxheaders}
+
+    Hash: {self.hash_data}
+    VCL Calls: {self.vcl_calls}
+
+    Response: {self.txprotocol} {self.status} {self.response} [{self.length}B]
+        headers   : {self.txheaders}
+>""".format(self=self)
+        return res
+
+
+class BackendRequestLog(RequestLog):
+
+    def init(self, chunk, active=False):
+        super(BackendRequestLog, self).init(chunk, active)
+        self.backend_name = None
+
+    def on_append_chunk(self, chunk):
+        super(BackendRequestLog, self).on_append_chunk(chunk)
+        name = chunk.tag.name
+        if name == 'txrequest':
+            self.method = chunk.data
+
+        elif name == 'txurl':
+            self.url = chunk.data
+
+        elif name == 'rxstatus':
+            self.status = int(chunk.data)
+
+        elif name == 'rxresponse':
+            self.response = chunk.data
+
+        elif name in ('backendopen', 'backendreuse'):
+            self.backend_name = chunk.data.split(" ")[0]
+
+    def __repr__(self):
+        return """
+<{self.__class__.__name__} [backend: {self.backend_name}]
+    Request: {self.rxprotocol} {self.method} {self.url}
+        headers   : {self.rxheaders}
+
+    Response: {self.txprotocol} {self.status} {self.response} [{self.length}B]
+        headers   : {self.txheaders}
+>""".format(self=self)
