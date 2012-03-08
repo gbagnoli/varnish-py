@@ -4,3 +4,4 @@ dist
 *.egg
 .coverage
 tests.ini
+.env
