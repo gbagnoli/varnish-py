@@ -26,10 +26,16 @@ import collections
 import ctypes
 import logging
 from .vsm import _VSM_data
-from ..exc import VarnishException
+from ..exc import (VarnishException,
+                   VarnishUnHandledException)
 
 
-__all__ = ['setup', 'init', 'open_', 'name_to_tag', 'dispatch', 'LogTags']
+__all__ = ['setup', 'init', 'open_', 'name_to_tag', 'dispatch', 'next',
+           'process_old_entries', 'process_backend_requests',
+           'process_client_requests', 'include_tag', 'include_tag_regex',
+           'exclude_tag',  'exclude_tag_regex', 'stop_after', 'skip_first',
+           'read_entries_from_file', 'filter_transactions_by_tag_regex',
+           'ignore_case_in_regex']
 varnishapi = ctypes.CDLL('libvarnishapi.so')
 log = logging.getLogger(__name__)
 
@@ -95,9 +101,12 @@ class LogTags(collections.Mapping):
 
 class LogChunk(object):
     """ Python object that represent a log entry """
+    tags = None
 
     def __init__(self, tag, fd, len_, spec, ptr, bitmap):
-        self.tag = LogTags()[tag]
+        if not self.__class__.tags:
+            self.__class__.tags = LogTags()
+        self.tag = self.tags[tag]
         self.fd = int(fd)  # file descriptor associated with this record
         self.client = spec == _VSL_S_CLIENT
         self.backend = spec == _VSL_S_BACKEND
@@ -136,9 +145,15 @@ _VSL_Open = varnishapi.VSL_Open
 _VSL_Open.argtypes = [ctypes.POINTER(_VSM_data), ctypes.c_int]
 _VSL_Open.restype = ctypes.c_int
 
-# TODO: define enum_vsl_tag!
-                        # return priv,     tag,   fd,
-                        # len,    spec,   ptr,      bitmap
+_VSL_Arg = varnishapi.VSL_Arg
+_VSL_Arg.argtypes = [ctypes.POINTER(_VSM_data), ctypes.c_int, ctypes.c_char_p]
+_VSL_Arg.restype = ctypes.c_int
+
+
+                                # return,       priv,
+                                # tag,          fd,
+                                # len,          spec,
+                                # ptr,          bitmap
 _VSL_handler_f = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p,
                                   ctypes.c_int, ctypes.c_uint,
                                   ctypes.c_uint, ctypes.c_uint,
@@ -147,6 +162,12 @@ _VSL_Dispatch = varnishapi.VSL_Dispatch
 _VSL_Dispatch.argtypes = [ctypes.POINTER(_VSM_data),
                           _VSL_handler_f, ctypes.py_object]
 _VSL_Dispatch.restype = ctypes.c_int
+
+_VSL_NextLog = varnishapi.VSL_NextLog
+_VSL_NextLog.argtypes = [ctypes.POINTER(_VSM_data),
+                         ctypes.POINTER(ctypes.POINTER(ctypes.c_uint32)),
+                         ctypes.POINTER(ctypes.c_uint64)]
+_VSL_NextLog.restype = ctypes.c_int
 
 
 def setup(varnish_handle):
@@ -188,29 +209,122 @@ def name_to_tag(name, match_length=-1):
         return tagcode
 
 
-# TODO: add filters!
 def dispatch(varnish_handle, callback, private_data=None):
     def _callback(priv, tag, fd, len_, spec, ptr, bitmap):
         if priv:
             priv = ctypes.cast(priv, ctypes.py_object).value
 
-        lchunk = LogChunk(tag, fd, len_, spec, ptr, bitmap)
-        res = 1
+        res = True
+        try:
+            lchunk = LogChunk(tag, fd, len_, spec, ptr, bitmap)
+
+        except:
+            return res
         try:
             res = callback(lchunk, priv)
 
-        except:
-            log.exception('Error while calling callback')
+        except Exception as e:
+            res = False
+            _callback.exception = e
 
         finally:
-
-            if res is None:
-                res = 0
+            res = 1 if res is False else 0
             return res
+
+    # add an exception attr to callback, used to collect and re-raise eventual
+    # exceptions raised in user callback
+    _callback.exception = None
 
     c_callback = _VSL_handler_f(_callback)
     if not private_data is None:
         private_data = ctypes.py_object(private_data)
 
     log.debug("Calling dispatch with callback at %s", callback)
-    return _VSL_Dispatch(varnish_handle, c_callback, private_data)
+    result = _VSL_Dispatch(varnish_handle, c_callback, private_data)
+
+    if _callback.exception:
+        raise _callback.exception
+
+    return bool(result)
+
+
+def arg_(varnish_handle, flag, option=None):
+    result = _VSL_Arg(varnish_handle, ord(flag), option)
+    if result == -1:
+        raise VarnishException('Cannot set filter %s = %s' % (flag, option))
+
+    if result == 0:
+        raise VarnishUnHandledException('Filter "%s" unhandled: %s' % (flag,
+                                                                      option))
+
+
+def process_old_entries(varnish_handle):
+    arg_(varnish_handle, 'd')
+
+
+def process_client_requests(varnish_handle):
+    arg_(varnish_handle, 'c')
+
+
+def process_backend_requests(varnish_handle):
+    arg_(varnish_handle, 'b')
+
+
+def include_tag(varnish_handle, tag):
+    arg_(varnish_handle, 'i', tag)
+
+
+def include_tag_regex(varnish_handle, tag_regex):
+    arg_(varnish_handle, 'I', tag_regex)
+
+
+def stop_after(varnish_handle, num):
+    arg_(varnish_handle, 'k', str(num))
+
+
+def read_entries_from_file(varnish_handle, filename):
+    arg_(varnish_handle, 'r', filename)
+
+
+def skip_first(varnish_handle, num):
+    arg_(varnish_handle, 's', str(num))
+
+
+def exclude_tag(varnish_handle, tag):
+    arg_(varnish_handle, 'x', tag)
+
+
+def exclude_tag_regex(varnish_handle, tag_regex):
+    arg_(varnish_handle, 'X', tag_regex)
+
+
+def filter_transactions_by_tag_regex(varnish_handle, tag_regex):
+    arg_(varnish_handle, 'm', tag_regex)
+
+
+def ignore_case_in_regex(varnish_handle):
+    arg_(varnish_handle, 'C')
+
+
+def next(varnish_handle):
+
+    raise NotImplementedError()
+    # raw_log = ctypes.POINTER(ctypes.c_uint32)()
+    # bitmap = ctypes.c_uint64(0)
+    # result = _VSL_NextLog(varnish_handle,
+    #                       ctypes.byref(raw_log),
+    #                       ctypes.byref(bitmap))
+    # print result
+    # if result != 1:
+    #     return None
+
+    # tag = raw_log[0] >> 24
+    # fd = raw_log[1]
+    # len_ = raw_log[0] & 0xffff
+    # # FIXME
+    # data = ctypes.cast(raw_log, ctypes.c_void_p)
+    # data.value += 2
+    # data = ctypes.cast(data, ctypes.c_char_p)
+
+    # spec = 0  # fixme
+    # return LogChunk(tag, fd, len_, spec, data.value, bitmap.value)
