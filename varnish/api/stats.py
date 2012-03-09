@@ -148,29 +148,29 @@ def iterate(varnish_handle, callback, private_data=None):
             priv = ctypes.cast(priv, ctypes.py_object).value
 
         try:
-            res = 1
-            callback(value, priv)
-
-        except StopIteration:
-            res = 1
+            res = callback(value, priv)
 
         except Exception as e:
-            res = 1  # FIXME: errors seems masked!
-            log.exception("Error while calling callback")
-            raise e
+            res = False
+            _callback.exceptions = e
 
         else:
-            res = 0
+            res = 1 if res is False else 0
 
         finally:
             return res
 
+    _callback.exception = None
     c_callback = _VSC_iter_f(_callback)
 
     if not private_data is None:
         private_data = ctypes.py_object(private_data)
 
-    _VSC_Iter(varnish_handle, c_callback, private_data)
+    result = _VSC_Iter(varnish_handle, c_callback, private_data)
+    if _callback.exception:
+        raise _callback.exception
+
+    return bool(result)
 
 
 def filter_(varnish_handle, name, exclude=False):
