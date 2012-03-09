@@ -25,17 +25,47 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 from datetime import datetime
 import inspect
 import logging
+import functools
 from .api import logs
 from .utils import MultiDict
 log = logging.getLogger(__name__)
 
 
 class VarnishLogs(object):
+    default_settings = {
+           'process_old_entries': False,
+           'process_backend_requests': False,
+           'process_client_requests': False,
+           'include_tag': None,
+           'include_tag_regex': None,
+           'exclude_tag': None,
+           'exclude_tag_regex': None,
+           'stop_after': None,
+           'skip_first': None,
+           'read_entries_from_file': None,
+           'filter_transactions_by_tag_regex': None,
+           'ignore_case_in_regex': False
+        }
 
-    def __init__(self, varnish):
+    def __init__(self, varnish, **settings):
+        self.settings = dict(self.default_settings)
+        self.settings.update(settings)
         self.varnish = varnish
         self.vd = varnish.vd
         logs.init(self.vd, True)
+        for st, value in self.settings.items():
+            if value and self.default_settings[st] is False:
+                getattr(logs, st)(self.vd)
+
+            elif value:
+                getattr(logs, st)(self.vd, value)
+
+    def __getattr__(self, attr):
+        if attr in self.default_settings:
+            return functools.partial(getattr(logs, attr),
+                                     varnish_handle=self.vd)
+
+        raise AttributeError(attr)
 
     def dispatch_chunks(self, callback):
         """ Read logs from varnish shared memory logs, then call callback
@@ -47,16 +77,20 @@ class VarnishLogs(object):
             args = len(inspect.getargspec(callback).args)
 
         def wrapper(chunk, priv):
+            res = False
+
             if callback and args == 0:
-                callback()
+                res = callback()
 
             elif callback:
-                callback(chunk)
+                res = callback(chunk)
+
+            return res
 
         if hasattr(self, 'source'):
             raise NotImplemented
 
-        logs.dispatch(self.vd, wrapper)
+        logs.dispatch(self.vd, wrapper, self)
 
     def dispatch_requests(self, callback, aggregate=1000):
         """ Read logs from Varnish shared memory Logs, then call callback
@@ -68,17 +102,18 @@ class VarnishLogs(object):
             client request that generated it
         """
         if aggregate:
-            # we use a multidict because it is ordered
+            # use a multidict because it is ordered
             backend_requests = MultiDict()
 
         def cb(chunk):
             ev = RequestLog(chunk)
             # discard invalid, incomplete and empty logs
+            res = True
             if not ev or not ev.complete or (ev.backend and not ev.chunks):
-                return
+                return res
 
             if not aggregate:
-                callback(ev)
+                res = callback(ev)
 
             elif ev.backend:
                 id_ = ev.txheaders.getone('x-varnish')
@@ -87,14 +122,16 @@ class VarnishLogs(object):
 
             elif ev.client and ev.id in backend_requests:
                 ev.backend_request = backend_requests.getone(ev.id)
-                callback(ev)
+                res = callback(ev)
 
             else:
                 # backend request was not read, leaving to None
-                callback(ev)
+                res = callback(ev)
 
-            if len(backend_requests) > aggregate:
+            if aggregate and len(backend_requests) > aggregate:
                 backend_requests.trim(aggregate)
+
+            return res
 
         self.dispatch_chunks(callback=cb)
 
@@ -267,12 +304,19 @@ class ClientRequestLog(RequestLog):
             xid, started_at, completed_at, \
                 req_start_delay, processing_time, \
                 deliver_time = chunk.data.split(" ")
-            assert self.id == xid
             self.started_at = datetime.fromtimestamp(float(started_at))
             self.completed_at = datetime.fromtimestamp(float(completed_at))
             self.req_start_delay = float(req_start_delay)
             self.processing_time = float(processing_time)
             self.deliver_time = float(deliver_time)
+
+    @property
+    def hit(self):
+        return "hit" in self.vcl_calls
+
+    @property
+    def miss(self):
+        return "miss" in self.vcl_calls
 
     def __repr__(self):
         res = """
