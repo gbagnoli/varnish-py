@@ -229,6 +229,12 @@ class MultiDict(collections.MutableMapping):
     def values(self):
         return [v for k, v in self._items]
 
+    def trim(self, size):
+        if len(self) <= size:
+            return
+
+        self._items = self._items[-size:]
+
 
 def _hide_passwd(items):
     for k, v in items:
