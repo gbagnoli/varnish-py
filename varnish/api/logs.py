@@ -298,8 +298,8 @@ def exclude_tag_regex(varnish_handle, tag_regex):
     arg_(varnish_handle, 'X', tag_regex)
 
 
-def filter_transactions_by_tag_regex(varnish_handle, tag_regex):
-    arg_(varnish_handle, 'm', tag_regex)
+def filter_transactions_by_tag_regex(varnish_handle, tag, regex):
+    arg_(varnish_handle, 'm', "{0}:{1}".format(tag, regex))
 
 
 def ignore_case_in_regex(varnish_handle):

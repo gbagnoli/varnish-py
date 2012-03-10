@@ -54,20 +54,22 @@ class VarnishLogs(object):
         self.vd = varnish.vd
         logs.init(self.vd, True)
         for st, value in self.settings.items():
-            if value and self.default_settings[st] is False:
+            if value and self.default_settings[st] is None:
+                getattr(logs, st)(self.vd, value)
+
+            elif value and self.default_settings[st] is False:
                 getattr(logs, st)(self.vd)
 
-            elif value:
-                getattr(logs, st)(self.vd, value)
+            if value and st == "filter_transactions_by_tag_regex":
+                getattr(logs, st)(self.vd, value[0], value[1])
 
     def __getattr__(self, attr):
         if attr in self.default_settings:
-            return functools.partial(getattr(logs, attr),
-                                     varnish_handle=self.vd)
+            return functools.partial(getattr(logs, attr), self.vd)
 
         raise AttributeError(attr)
 
-    def dispatch_chunks(self, callback):
+    def dispatch_chunks(self, callback, source=None):
         """ Read logs from varnish shared memory logs, then call callback
             for every chunk as returned from the low level api
             `callback` must be a callable that accepts 0 or 1 positional
@@ -87,12 +89,12 @@ class VarnishLogs(object):
 
             return res
 
-        if hasattr(self, 'source'):
-            raise NotImplemented
+        if source:
+            self.read_entries_from_file(source)
 
-        logs.dispatch(self.vd, wrapper, self)
+        logs.dispatch(self.vd, wrapper)
 
-    def dispatch_requests(self, callback, aggregate=1000):
+    def dispatch_requests(self, callback, aggregate=1000, source=None):
         """ Read logs from Varnish shared memory Logs, then call callback
             when a RequestLog is complete (all its chunks have been read).
             `callback` must be a callable that accepts 1 positional parameter
