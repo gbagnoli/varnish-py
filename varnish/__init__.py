@@ -28,6 +28,7 @@ from .utils import setup_logging
 from . import api
 from .stats import VarnishStats
 from .logs import VarnishLogs
+from .exc import VarnishUninitializedError
 
 __version__ = (0, 0, 0, 'dev', 0)
 setup_logging()
@@ -35,32 +36,52 @@ __all__ = ['Instance']
 log = logging.getLogger(__name__)
 
 
+def check_initialized(method):
+    def wrapper(self, *args, **kwargs):
+        if not self.vd:
+            raise VarnishUninitializedError()
+
+        return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Instance(object):
 
     def __init__(self, name=None, log_level=None):
+        self.vd = None
+        self.log_level = log_level
+        self._name = name
+        if self.log_level:
+            self.log_level = self.log_level.lower()
+
+    def init(self):
         self.vd = api.init()
-        if log_level:
-            log_level = log_level.lower()
-            log_method = getattr(log, log_level)
+        if self.log_level:
+            log_method = getattr(log, self.log_level)
             api.set_diagnostic_function(self.vd, log_method, None)
 
-        self._name = name
         if self._name:
             api.access_instance(self.vd, self._name)
 
+    @check_initialized
     def close(self):
         api.close(self.vd)
         api.delete(self.vd)
+        self.vd = None
 
-    def __del__(self):
-        try:
-            self.close()
-        except:
-            pass
+    def __enter__(self):
+        self.init()
+        return self
 
+    def __exit__(self, type, value, tb):
+        self.close()
+
+    @check_initialized
     def open(self, verbose=False):
         api.open(self.vd, verbose)
 
+    @check_initialized
     def reopen(self, verbose=False):
         api.open(self.vd, verbose)
 
@@ -69,6 +90,7 @@ class Instance(object):
         return self._name or "default"
 
     @property
+    @check_initialized
     def stats(self):
         if not hasattr(self, "_stats"):
             self._stats = VarnishStats(self)
@@ -76,6 +98,7 @@ class Instance(object):
         return self._stats
 
     @property
+    @check_initialized
     def logs(self):
         """ Accessing logs using the same instance used to read stats will
             result in an assertion failure in varnish <= 3.0.2
