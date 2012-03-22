@@ -69,6 +69,11 @@ class Instance(object):
         api.close(self.vd)
         api.delete(self.vd)
         self.vd = None
+        if hasattr(self, '_stats'):
+            del self._stats
+
+        if hasattr(self, '_logs'):
+            del self._logs
 
     def __enter__(self):
         self.init()
@@ -83,11 +88,11 @@ class Instance(object):
 
     @check_initialized
     def reopen(self, verbose=False):
-        api.open(self.vd, verbose)
+        api.reopen(self.vd, verbose)
 
     @property
     def name(self):
-        return self._name or "default"
+        return self._name or "<default>"
 
     @property
     @check_initialized
