@@ -53,6 +53,18 @@ class VarnishStats(object):
         stats.iterate(self.vd, wrapper, stats_list)
         return VarnishStatsReading(stats_list)
 
+    def filter(self, filter_, exclude=False):
+        """ Set filters for next read() calls. Return self, so calls are
+            chainable """
+        stats.filter_(self.vd, filter_, exclude)
+        return self
+
+    def exclude(self, filter_):
+        return self.filter(filter_, exclude=True)
+
+    def include(self, filter_):
+        return self.filter(filter_, exclude=False)
+
     def __iter__(self):
         return self
 
@@ -74,6 +86,12 @@ class VarnishStatsReading(collections.Mapping):
         for point in points:
             self._points[point.full_name] = point
 
+    def iter_by_class(self, class_):
+        return (p for p in self.itervalues() if p.cls == class_)
+
+    def get_in_class(self, class_):
+        return list(self.iter_by_class(class_))
+
     def __getitem__(self, key):
         return self._points[key]
 
@@ -93,6 +111,15 @@ class VarnishStatsReading(collections.Mapping):
     def __repr__(self):
         return "<%s[%s] - %s>" % (self.__class__.__name__,
                                  self.timestamp, self._points)
+
+    def __getattr__(self, attr):
+        try:
+            return self[attr].value
+
+        except KeyError:
+            raise AttributeError(attr)
+
+        raise AttributeError(attr)
 
     def __setattr__(self, attr, value):
         raise TypeError("'%s' object does not support "
