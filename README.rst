@@ -12,3 +12,5 @@ It uses ctypes to call function in the C library libvarnishapi, distributed as p
   ...     print stats
   ...
   <VarnishStatsReading[2012-03-21 09:23:09.088649] - 196 elements>
+
+See ``examples/stats.py`` for more about reading stats.
