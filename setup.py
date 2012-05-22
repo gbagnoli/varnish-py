@@ -37,7 +37,7 @@ setup(
     author='Giacomo Bagnoli',
     version=':versiontools:varnish:',
     author_email='g.bagnoli@asidev.com',
-    packages=['varnish'],
+    packages=['varnish', 'varnish.api'],
     include_package_data=True,
     url='',
     description='Python ctypes interface for libvarnishapi',
