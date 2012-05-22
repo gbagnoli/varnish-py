@@ -135,7 +135,7 @@ class VarnishLogs(object):
 
             return res
 
-        self.dispatch_chunks(callback=cb)
+        self.dispatch_chunks(callback=cb, source=source)
 
     def __str__(self):
         return "<%s [instance: %s]>" % (self.__class__.__name__,
