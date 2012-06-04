@@ -94,7 +94,8 @@ class VarnishLogs(object):
 
         logs.dispatch(self.vd, wrapper)
 
-    def dispatch_requests(self, callback, aggregate=1000, source=None):
+    def dispatch_requests(self, callback, aggregate=1000, source=None,
+                          nonrequest_callback=None):
         """ Read logs from Varnish shared memory Logs, then call callback
             when a RequestLog is complete (all its chunks have been read).
             `callback` must be a callable that accepts 1 positional parameter
@@ -102,12 +103,19 @@ class VarnishLogs(object):
              of RequestLog)
             if `aggregate` is true, try to relate backend requests to the
             client request that generated it
+            `nonrequest_callback` (optional), if set, must be a callable that
+            accepts 1 positional parameter (an instance of
+            varnish.api.logs.LogChunk) which will be invoked for log lines not
+            related to any individual request.
         """
         if aggregate:
             # use a multidict because it is ordered
             backend_requests = MultiDict()
 
         def cb(chunk):
+            if chunk.fd == 0 and nonrequest_callback:
+                return nonrequest_callback(chunk)
+
             ev = RequestLog(chunk)
             # discard invalid, incomplete and empty logs
             res = True
@@ -135,7 +143,7 @@ class VarnishLogs(object):
 
             return res
 
-        self.dispatch_chunks(callback=cb)
+        self.dispatch_chunks(callback=cb, source=source)
 
     def __str__(self):
         return "<%s [instance: %s]>" % (self.__class__.__name__,
